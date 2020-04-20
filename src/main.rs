@@ -1,11 +1,7 @@
-use tokio::net::TcpStream;
-use tokio::prelude::*;
-use std::sync::{RwLock, Arc};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use rand::Rng;
-use std::{thread, time};
-use std::io::{self, Read};
-use std::thread::Thread;
+use std::io;
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time;
 
 fn main() {
     let (cmd_sender, cmd_receiver) = channel::<i32>();
@@ -13,10 +9,10 @@ fn main() {
 
     thread::spawn(move || {
         let mut input = String::new();
-        println!("Input cmd: ");
+        println!("Input cmd (integer or 0 to exit): ");
         loop {
             match io::stdin().read_line(&mut input) {
-                Ok(n) => {
+                Ok(_) => {
                     let cmd_str = &input[0..input.len() - 1];
                     match cmd_str.parse::<i32>() {
                         Ok(cmd) => {
@@ -53,9 +49,9 @@ fn main() {
         cmd
     };
 
-    let apply_evt = |evt:i32| {
+    let apply_evt = |evt: i32| {
         println!("send evt: {}", evt);
-        evt_sender.clone().send(evt);
+        evt_sender.clone().send(evt).unwrap();
     };
 
     service(next_cmd, apply_evt);
@@ -75,7 +71,6 @@ async fn service(next_cmd_fn: impl Fn() -> i32, apply_evt_fn: impl Fn(i32)) {
         let evt = calc(cmd).await;
         apply_evt_fn(evt);
         if evt == 0 {
-            //thread::sleep(time::Duration::from_millis(1000));
             break;
         }
     }
