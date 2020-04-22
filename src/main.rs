@@ -1,12 +1,16 @@
+use crossbeam::channel::{Sender, Receiver, bounded, unbounded};
+use once_cell::sync::Lazy;
+use rustyline::Cmd;
 use std::io;
-use std::sync::mpsc::channel;
 use std::thread;
 use std::time;
+use tokio::time::delay_for;
+
+static CMD_CHANNEL: Lazy<(Sender<i32>, Receiver<i32>)> = Lazy::new(unbounded);
+static EVT_CHANNEL: Lazy<(Sender<i32>, Receiver<i32>)> = Lazy::new(unbounded);
 
 fn main() {
-    let (cmd_sender, cmd_receiver) = channel::<i32>();
-    let (evt_sender, evt_receiver) = channel::<i32>();
-
+    // user input thread
     thread::spawn(move || {
         let mut input = String::new();
         println!("Input cmd (integer or 0 to exit): ");
@@ -16,8 +20,8 @@ fn main() {
                     let cmd_str = &input[0..input.len() - 1];
                     match cmd_str.parse::<i32>() {
                         Ok(cmd) => {
+                            CMD_CHANNEL.0.send(cmd).unwrap();
                             println!("send cmd: {}", cmd);
-                            cmd_sender.send(cmd).unwrap();
                             if cmd == 0 {
                                 break;
                             }
@@ -33,9 +37,10 @@ fn main() {
         }
     });
 
+    // user output thread
     thread::spawn(move || {
         loop {
-            let evt = evt_receiver.recv().unwrap();
+            let evt = EVT_CHANNEL.1.recv().unwrap();
             println!("received evt: {}", evt);
             if evt == 0 {
                 break;
@@ -43,35 +48,28 @@ fn main() {
         }
     });
 
-    let next_cmd = || -> i32 {
-        let cmd = cmd_receiver.recv().unwrap();
-        println!("received cmd: {}", cmd);
-        cmd
-    };
-
-    let apply_evt = |evt: i32| {
-        println!("send evt: {}", evt);
-        evt_sender.clone().send(evt).unwrap();
-    };
-
-    service(next_cmd, apply_evt);
+    start();
 }
 
-async fn calc(cmd: i32) -> i32 {
-    let dur = time::Duration::from_millis(10);
-    thread::sleep(dur);
-    println!("({}) calc {}", thread::current().name().unwrap(), cmd);
-    cmd * 10
-}
-
+// async processing thread
 #[tokio::main]
-async fn service(next_cmd_fn: impl Fn() -> i32, apply_evt_fn: impl Fn(i32)) {
+async fn start() {
     loop {
-        let cmd = next_cmd_fn();
+        let cmd = CMD_CHANNEL.1.recv().unwrap();
+        println!("received cmd: {}", cmd);
         let evt = calc(cmd).await;
-        apply_evt_fn(evt);
+        EVT_CHANNEL.0.send(evt).unwrap();
+        println!("sent evt: {}", evt);
         if evt == 0 {
+            println!("quitting.");
             break;
         }
     }
+}
+
+async fn calc(cmd: i32) -> i32 {
+    let dur = time::Duration::from_millis(cmd as u64);
+    delay_for(dur).await;
+    println!("({}) calc {}", thread::current().name().unwrap(), cmd);
+    cmd * 10
 }
